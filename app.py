@@ -2,23 +2,25 @@ import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
 import numpy as np
+import tempfile
+import os
 
 # -----------------------------
-# LOAD MODEL (make sure best.pt is in same folder)
-# -----------------------------
-@st.cache_resource
-def load_model():
-    return YOLO("best.pt")
-
-model = load_model()
-
-# -----------------------------
-# UI
+# PAGE CONFIG (must be FIRST Streamlit command)
 # -----------------------------
 st.set_page_config(page_title="Chicken Detection App", page_icon="🐔")
 
 st.title("🐔 Chicken Detection App")
 st.write("Upload an image and the model will detect chickens.")
+
+# -----------------------------
+# LOAD MODEL (cached)
+# -----------------------------
+@st.cache_resource
+def load_model():
+    return YOLO("best.pt")  # make sure best.pt is in same folder
+
+model = load_model()
 
 # -----------------------------
 # UPLOAD IMAGE
@@ -33,9 +35,12 @@ if uploaded_file is not None:
     st.subheader("Original Image")
     st.image(image, use_container_width=True)
 
-    # Save temp image
-    image_path = "temp.jpg"
-    image.save(image_path)
+    # -----------------------------
+    # Save image safely (TEMP FILE FIX)
+    # -----------------------------
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+        image.save(tmp.name)
+        image_path = tmp.name
 
     # -----------------------------
     # RUN YOLO PREDICTION
@@ -43,14 +48,16 @@ if uploaded_file is not None:
     with st.spinner("Detecting..."):
         results = model(image_path)
 
-    # Get first result
     result = results[0]
 
+    # -----------------------------
     # Annotated image
+    # -----------------------------
     annotated_img = result.plot()
 
-    # Convert BGR → RGB (important fix)
-    annotated_img = annotated_img[..., ::-1]
+    # YOLO already returns RGB sometimes depending on version
+    # so we avoid double flipping issues
+    annotated_img = np.array(annotated_img)
 
     # -----------------------------
     # SHOW RESULT
@@ -58,15 +65,21 @@ if uploaded_file is not None:
     st.subheader("Detected Image")
     st.image(annotated_img, use_container_width=True)
 
-    # Optional: show boxes info
+    # -----------------------------
+    # DETECTIONS INFO
+    # -----------------------------
     st.subheader("Detections")
+
     boxes = result.boxes
 
-    if len(boxes) > 0:
+    if boxes is not None and len(boxes) > 0:
         for box in boxes:
             cls = int(box.cls[0])
             conf = float(box.conf[0])
 
-            st.write(f"Class: {model.names[cls]} | Confidence: {conf:.2f}")
+            st.write(f"🐔 Class: {model.names[cls]} | Confidence: {conf:.2f}")
     else:
         st.write("No objects detected.")
+
+    # cleanup temp file
+    os.remove(image_path)
